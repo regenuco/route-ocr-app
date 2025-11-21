@@ -274,4 +274,3 @@ if uploaded_file is not None:
                 file_name="route_sheet_processed.csv",
                 mime="text/csv"
             )
-streamlit run app.py
