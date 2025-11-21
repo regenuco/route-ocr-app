@@ -1,6 +1,6 @@
 streamlit
-pillow
-pytesseract
+easyocr
 opencv-python-headless
 numpy
+Pillow
 requests
