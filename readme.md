@@ -1,15 +1,10 @@
-# Route Sheet OCR Web App
+# Route Sheet OCR (PaddleOCR-Lite Version)
 
-This app auto-detects handwritten lines, zooms them, OCRs them, verifies business
-names + addresses, and exports a CSV. Designed for route drivers taking photos
-of used cooking oil pickup sheets.
+100% Streamlit-Cloud-compatible OCR → Verification → CSV tool.
 
-## How to Deploy (Streamlit Cloud)
+## Deployment
 
-1. Go to https://share.streamlit.io
-2. Sign in with GitHub
-3. Create a new app
-4. Select this repository
-5. Set main file to: app.py
-6. Deploy
-
+1. Upload app.py + requirements.txt to GitHub
+2. Go to https://share.streamlit.io
+3. Deploy your repo
+4. Done
