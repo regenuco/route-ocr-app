@@ -43,7 +43,7 @@ def detect_and_crop_lines(image):
 
         thresh = cv2.adaptiveThreshold(
             gray2, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C
+            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY,
             31, 8
         )
