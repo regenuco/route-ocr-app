@@ -1,54 +1,53 @@
 import streamlit as st
+from paddleocr import PaddleOCR
 import cv2
 import numpy as np
-import easyocr
-import requests
 import pandas as pd
+import requests
 from PIL import Image
 import io
 import csv
 import re
 
-# ----------------------
-# EasyOCR Reader (loads once)
-# ----------------------
+# ---------------------------
+# LOAD OCR (PaddleOCR Lite)
+# ---------------------------
 @st.cache_resource
-def load_reader():
-    return easyocr.Reader(['en'], gpu=False)
+def load_ocr():
+    return PaddleOCR(
+        use_angle_cls=True,
+        lang='en',
+        det_model_dir=None,   # use built-in lightweight models
+        rec_model_dir=None,
+        cls_model_dir=None,
+        use_gpu=False
+    )
 
-reader = load_reader()
+ocr = load_ocr()
 
-# ----------------------
-# Detect & Auto-Zoom Handwritten Lines
-# ----------------------
-
+# ---------------------------
+# Detect & Auto-Zoom Lines
+# ---------------------------
 def detect_and_crop_lines(pil_image):
     img = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    blur = cv2.GaussianBlur(gray, (5, 5), 0)
+    blur = cv2.GaussianBlur(gray, (5,5), 0)
     edges = cv2.Canny(blur, 50, 150)
 
-    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50, 3))
+    kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (50,3))
     dilated = cv2.dilate(edges, kernel, iterations=2)
 
-    cnts, _ = cv2.findContours(
-        dilated,
-        cv2.RETR_EXTERNAL,
-        cv2.CHAIN_APPROX_SIMPLE
-    )
-
+    cnts, _ = cv2.findContours(dilated, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cnts = sorted(cnts, key=lambda c: cv2.boundingRect(c)[1])
 
     crops = []
     for c in cnts:
         x, y, w, h = cv2.boundingRect(c)
-
         if h < 25 or w < 200:
             continue
 
         crop = img[y:y+h, x:x+w]
-
         crop = cv2.resize(crop, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
 
         gray2 = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
@@ -60,34 +59,29 @@ def detect_and_crop_lines(pil_image):
             cv2.THRESH_BINARY,
             31, 8
         )
-
         crops.append(thresh)
 
     return crops
 
-# ----------------------
-# OCR Each Line Using EasyOCR
-# ----------------------
-
+# ---------------------------
+# OCR using PaddleOCR
+# ---------------------------
 def ocr_each_line(crops):
     lines = []
     for img in crops:
-        results = reader.readtext(img, detail=0, paragraph=True)
-        text = " ".join(results)
+        result = ocr.ocr(img, cls=True)
+        text = " ".join([line[1][0] for line in result[0]]) if result and result[0] else ""
         lines.append(text)
     return "\n".join(lines)
 
-# ----------------------
-# Parse OCR Text
-# ----------------------
-
+# ---------------------------
+# Parse OCR into rows
+# ---------------------------
 def extract_rows(text):
     rows = []
-    lines = [l.strip() for l in text.splitlines() if l.strip()]
-
-    for line in lines:
+    for line in [x.strip() for x in text.splitlines() if x.strip()]:
         low = line.lower()
-        if any(x in low for x in ["company", "phone", "dot", "plate", "driver", "name", "date"]):
+        if any(x in low for x in ["company","phone","dot","plate","driver","name","date"]):
             continue
 
         m = re.search(r"(\d+)\s+(\d{1,2}[-/]\d{1,2}[-/]\d{2,4})$", line)
@@ -98,17 +92,15 @@ def extract_rows(text):
         date = m.group(2)
         before = line[:m.start()].strip()
 
-        addr_idx = next((i for i, ch in enumerate(before) if ch.isdigit()), None)
-
-        if addr_idx is not None:
-            name = before[:addr_idx].strip(" ,")
-            addr = before[addr_idx:].strip(" ,")
+        addr_idx = next((i for i,c in enumerate(before) if c.isdigit()), None)
+        if addr_idx:
+            name = before[:addr_idx].strip()
+            addr = before[addr_idx:].strip()
         else:
-            name = before.strip(" ,")
+            name = before
             addr = ""
 
         rows.append({
-            "raw": line,
             "name_ocr": name,
             "address_ocr": addr,
             "gallons": gallons,
@@ -117,35 +109,29 @@ def extract_rows(text):
 
     return rows
 
-# ----------------------
-# Online Lookup (Nominatim)
-# ----------------------
-
+# ---------------------------
+# Address Verification (Nominatim)
+# ---------------------------
 def lookup_business(address):
     try:
         if not address:
             return None, "<red>(no address parsed)</red>"
 
         params = {"q": address, "format": "json", "limit": 1}
-        r = requests.get(
-            "https://nominatim.openstreetmap.org/search",
-            params=params,
-            headers={"User-Agent": "RouteSheetOCR-App"}
-        )
+        r = requests.get("https://nominatim.openstreetmap.org/search", params=params,
+                         headers={"User-Agent": "RouteOCR-App"})
         data = r.json()
 
         if not data:
             return None, "<red>(no match found)</red>"
 
-        return data[0].get("display_name", ""), None
-
+        return data[0]["display_name"], None
     except:
         return None, "<red>(lookup failed)</red>"
 
-# ----------------------
-# Verify & Correct
-# ----------------------
-
+# ---------------------------
+# Apply verification rules
+# ---------------------------
 def verify_and_correct(row):
     addr = row["address_ocr"]
     name = row["name_ocr"]
@@ -165,68 +151,47 @@ def verify_and_correct(row):
     row["address_final"] = verified
     return row
 
-# ----------------------
+# ---------------------------
 # CSV Export
-# ----------------------
-
+# ---------------------------
 def rows_to_csv_bytes(rows):
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["name", "address", "gallons", "date"])
-
+    writer.writerow(["name","address","gallons","date"])
     for r in rows:
-        writer.writerow([
-            r.get("name_final",""),
-            r.get("address_final",""),
-            r.get("gallons",""),
-            r.get("date","")
-        ])
-
+        writer.writerow([r["name_final"], r["address_final"], r["gallons"], r["date"]])
     return out.getvalue().encode("utf-8")
 
-# ----------------------
-# STREAMLIT UI
-# ----------------------
-
+# ---------------------------
+# Streamlit UI
+# ---------------------------
 st.set_page_config(page_title="Route Sheet OCR", layout="centered")
+st.title("📄 Route Sheet OCR → CSV (FAST • CLOUD-READY)")
 
-st.title("📄 Route Sheet OCR → CSV")
-st.write("Upload your handwritten route sheet. I’ll read it, verify addresses, "
-         "flag uncertainties in red, and export a CSV.")
-
-uploaded = st.file_uploader("Upload route sheet image", type=["jpg","jpeg","png"])
+uploaded = st.file_uploader("Upload photo of route sheet", type=["jpg","jpeg","png"])
 
 if uploaded:
-    pil_img = Image.open(uploaded).convert("RGB")
-    st.image(pil_img, caption="Uploaded Image", use_column_width=True)
+    pil = Image.open(uploaded).convert("RGB")
+    st.image(pil, caption="Uploaded Image", use_column_width=True)
 
     if st.button("Process Sheet"):
-        with st.spinner("Reading handwriting… please wait..."):
-            crops = detect_and_crop_lines(pil_img)
+        with st.spinner("Processing…"):
+            crops = detect_and_crop_lines(pil)
             text = ocr_each_line(crops)
             extracted = extract_rows(text)
             verified = [verify_and_correct(r) for r in extracted]
 
         if not verified:
-            st.error("No valid rows detected. Try a clearer photo.")
+            st.error("No readable lines found.")
         else:
-            display_rows = []
-            for r in verified:
-                display_rows.append({
-                    "Name": r["name_final"],
-                    "Address": r["address_final"],
-                    "Gallons": r["gallons"],
-                    "Date": r["date"]
-                })
-
-            df = pd.DataFrame(display_rows)
-            st.subheader("Extracted & Verified Data")
+            df = pd.DataFrame(verified)
+            st.subheader("Extracted & Verified Results")
             st.dataframe(df, use_container_width=True)
 
             csv_bytes = rows_to_csv_bytes(verified)
             st.download_button(
-                label="⬇️ Download CSV",
-                data=csv_bytes,
-                file_name="route_sheet.csv",
-                mime="text/csv"
+                "⬇️ Download CSV",
+                csv_bytes,
+                "route_sheet.csv",
+                "text/csv"
             )
