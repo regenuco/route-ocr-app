@@ -1,9 +1,7 @@
 streamlit
-transformers
-torch
-torchvision
+openai>=1.40.0
+opencv-python-headless
 Pillow
 requests
 numpy
 pandas
-opencv-python-headless
