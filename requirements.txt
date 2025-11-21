@@ -1,7 +1,9 @@
 streamlit
-paddleocr
-opencv-python-headless
-pillow
+transformers
+torch
+torchvision
+Pillow
 requests
 numpy
 pandas
+opencv-python-headless
