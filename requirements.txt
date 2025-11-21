@@ -1,7 +1,7 @@
 streamlit
-pytesseract
-Pillow
+easyocr
 opencv-python-headless
+Pillow
 requests
 numpy
 pandas
